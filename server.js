@@ -1,10 +1,14 @@
 const express = require('express');
+const cors = require('cors');
 const { exec } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
 const app = express();
+
+// CORS aur JSON configurations (Frontend connection bypass ke liye)
+app.use(cors()); 
 app.use(express.json()); 
 
 // Remote Execution API Endpoint
@@ -44,7 +48,7 @@ app.post('/api/execute', (req, res) => {
         // Programmatic system execution calling your compiled binary tool
         const command = `.\\qrun ${tempFileName}`;
 
-            exec(command, (execError, stdout, stderr) => {
+        exec(command, (execError, stdout, stderr) => {
             // Instantly delete the file from your disk storage array
             fs.unlink(tempFilePath, () => {}); 
 
@@ -70,5 +74,6 @@ app.post('/api/execute', (req, res) => {
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
     console.log(`Quantum Language Engine API online on port ${PORT}`);
-    module.exports = app;
 });
+
+module.exports = app;
