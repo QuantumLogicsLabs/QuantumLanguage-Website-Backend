@@ -28,6 +28,7 @@ points.
 ```bash
 npm install
 cp .env.example .env
+cp subscribers.example.txt subscribers.txt
 npm run dev   # nodemon, restarts on file changes
 # or
 npm start     # plain node
