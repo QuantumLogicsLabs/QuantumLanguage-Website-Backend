@@ -7,6 +7,7 @@ const { execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const newsletterRoutes = require('./newsletter');
 
 const app = express();
 
@@ -230,7 +231,7 @@ app.post('/api/execute', executeLimiter, (req, res) => {
 
 const { handleChatRequest } = require('./chatHandler');
 app.post('/api/chat', handleChatRequest);
-
+app.use('/api/newsletter', newsletterRoutes);
 app.use((req, res) => {
     res.status(404).json({ success: false, error: 'Not found.' });
 });
