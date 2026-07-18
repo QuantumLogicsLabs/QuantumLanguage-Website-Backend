@@ -29,7 +29,7 @@ function setupWebSocket(server) {
 
                         // Execute directly - no intermediate status messages
                         const fileHash = crypto.randomBytes(8).toString('hex');
-                        const rawExt = typeof data.ext === 'string' ? data.ext : '.sa';
+const rawExt = typeof data.ext === 'string' ? data.ext : '.sa';
 const safeExt = config.ALLOWED_EXTENSIONS.includes(rawExt) ? rawExt : '.sa';
 const tempFilePath = path.join(config.SANDBOX_DIR, `sandbox_${fileHash}${safeExt}`);
 
@@ -46,7 +46,7 @@ const tempFilePath = path.join(config.SANDBOX_DIR, `sandbox_${fileHash}${safeExt
                                 return;
                             }
 
-                            const needsShell = qrunPath.toLowerCase().endsWith('.bat');
+const needsShell = qrunPath.toLowerCase().endsWith('.bat');
 activeProcess = spawn(qrunPath, [tempFilePath], { shell: needsShell });
 
                             activeProcess.stdout.on('data', (outputData) => {
