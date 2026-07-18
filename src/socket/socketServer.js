@@ -4,6 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 const { resolveQrunPath } = require("../services/qrun.service");
+const config = require("../config");
 
 let activeConnection = null;
 let activeProcess = null;
@@ -28,7 +29,9 @@ function setupWebSocket(server) {
 
                         // Execute directly - no intermediate status messages
                         const fileHash = crypto.randomBytes(8).toString('hex');
-                        const tempFilePath = path.join(__dirname, '..', 'tmp', `sandbox_${fileHash}.sa`);
+                        const rawExt = typeof data.ext === 'string' ? data.ext : '.sa';
+const safeExt = config.ALLOWED_EXTENSIONS.includes(rawExt) ? rawExt : '.sa';
+const tempFilePath = path.join(config.SANDBOX_DIR, `sandbox_${fileHash}${safeExt}`);
 
                         fs.writeFile(tempFilePath, data.payload, (err) => {
                             if (err) {
@@ -43,7 +46,8 @@ function setupWebSocket(server) {
                                 return;
                             }
 
-                            activeProcess = spawn(qrunPath, [tempFilePath]);
+                            const needsShell = qrunPath.toLowerCase().endsWith('.bat');
+activeProcess = spawn(qrunPath, [tempFilePath], { shell: needsShell });
 
                             activeProcess.stdout.on('data', (outputData) => {
                                 const text = outputData.toString().replace(/\n/g, '\r\n');
@@ -59,6 +63,11 @@ function setupWebSocket(server) {
                                 fs.unlink(tempFilePath, () => {});
                                 activeProcess = null;
                             });
+                            activeProcess.on('error', (spawnErr) => {
+    ws.send(JSON.stringify({ type: 'stderr', payload: `\x1b[31mFailed to start execution engine: ${spawnErr.message}\x1b[0m\r\n` }));
+    fs.unlink(tempFilePath, () => {});
+    activeProcess = null;
+});
                         });
                         break;
 
