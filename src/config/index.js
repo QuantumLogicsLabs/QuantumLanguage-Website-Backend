@@ -14,7 +14,7 @@ const config = {
   RATE_LIMIT_WINDOW_MS: Number(process.env.RATE_LIMIT_WINDOW_MS) || 60000,
   RATE_LIMIT_MAX: Number(process.env.RATE_LIMIT_MAX) || 20,
   MAX_BUFFER_BYTES: 5 * 1024 * 1024,
-  ALLOWED_EXTENSIONS: [".sa", ".js", ".py", ".cpp", ".c"],
+  ALLOWED_EXTENSIONS: [".sa", ".js", ".py", ".cpp", ".c", ".rb"],
   SANDBOX_DIR: path.join(__dirname, "..", "tmp"),
 };
 
