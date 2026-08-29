@@ -71,6 +71,15 @@ describe("POST /api/execute — validation", () => {
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/Unsupported file type/i);
   });
+
+  it("accepts and executes .rb Ruby code via qrun", async () => {
+    const res = await request(app)
+      .post("/api/execute")
+      .send({ ext: ".rb", code: 'puts "Quantum Ruby Engine Active"' });
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.output).toContain("Quantum Ruby Engine Active");
+  });
 });
 
 describe("POST /api/execute — demo samples (no qrun needed)", () => {

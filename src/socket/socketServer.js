@@ -28,7 +28,7 @@ function setupWebSocket(server) {
 
                         // Execute directly - no intermediate status messages
                         const fileHash = crypto.randomBytes(8).toString('hex');
-                        const ALLOWED_EXTS = ['.sa', '.js', '.py', '.cpp', '.c'];
+                        const ALLOWED_EXTS = ['.sa', '.js', '.py', '.rb', '.cpp', '.c'];
                         const ext = ALLOWED_EXTS.includes(data.ext) ? data.ext : '.sa';
 
                         const tempFilePath = path.join(__dirname, '..', 'tmp', `sandbox_${fileHash}${ext}`);
