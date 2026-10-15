@@ -307,6 +307,7 @@ async function handleChatRequest(req, res) {
             ];
 
             const groqUrl = 'https://api.groq.com/openai/v1/chat/completions';
+            const modelToUse = process.env.GROQ_MODEL || 'qwen/qwen3.8-27b';
             const response = await fetch(groqUrl, {
                 method: 'POST',
                 headers: {
@@ -314,7 +315,7 @@ async function handleChatRequest(req, res) {
                     'Authorization': `Bearer ${groqApiKey}`
                 },
                 body: JSON.stringify({
-                    model: 'llama-3.3-70b-versatile',
+                    model: modelToUse,
                     messages: formattedMessages,
                     temperature: 0.7,
                     max_tokens: 1024
