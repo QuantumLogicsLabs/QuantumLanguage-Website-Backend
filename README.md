@@ -56,7 +56,8 @@ All configuration is via environment variables (see `.env.example`):
 
 Every language except Quantum runs under `qrun --strict`. The program must be
 valid in its own language: anything the real tool would reject (gcc, g++,
-javac, python, node or ruby) is a compile error, and the program never runs.
+javac, python, node or ruby; an HTML or CSS validator) is a compile error, and
+the program never runs.
 That includes another language's syntax, a missing `;`, `cout` without
 `std::`, or an undeclared name in C/C++. The error is printed the way that
 tool prints it:
@@ -68,13 +69,18 @@ tool prints it:
 | Python | `File "main.py", line 1` / source line / caret / `SyntaxError: ...` (or `IndentationError`) | `Traceback (most recent call last): ...` |
 | JavaScript | `main.js:1` / source line / caret / `SyntaxError: ...` | node's `TypeError: ...` + stack trace |
 | Ruby | `main.rb:1: syntax error, unexpected ')' (SyntaxError)` + source line | `main.rb:2:in '<main>': boom (ArgumentError)` |
+| HTML | `index.html:4:12: error: Unclosed element "span".` + source line and caret (the W3C checker's wording) | &mdash; |
+| CSS | `style.css:1:6: error: Unknown property "colr". Did you mean "color"?` + source line and caret | &mdash; |
 
 Only `.sa` files get Quantum's reflexive mixed-syntax mode, where Python,
-JavaScript, Ruby, Java and C++ can share one file.
+JavaScript, Ruby, Java and C++ can share one file. A `.sa` file can also hold
+an HTML page (it starts with `<!DOCTYPE html>`, a comment or a tag) or a
+stylesheet; there, problems are reported as warnings and the page is still
+produced. `compiler/examples/html/` has 500 such pages.
 
 Every program runs on the Quantum VM: qrun has its own C, C++, Java, Python,
-JavaScript and Ruby front-ends. Python, Node.js, Ruby, gcc and the JDK are
-never installed or called.
+JavaScript, Ruby, HTML and CSS front-ends. Python, Node.js, Ruby, gcc, the
+JDK and browsers are never installed or called.
 
 ## API
 
@@ -99,7 +105,9 @@ endpoint as `POST /api/cpp`). An alias is the same endpoint under another name:
 | `/api/js` | `/api/javascript` | JavaScript | **strict**: a Node.js script (CommonJS: `require`, `process`, `fs`) |
 | `/api/py` | `/api/python` | Python | **strict**: a Python 3 program |
 | `/api/rb` | `/api/ruby` | Ruby | **strict**: a Ruby program |
-| `/api/sa` | `/api/quantum` | Quantum | **flexible**: Python, JavaScript, C/C++, Java and Ruby syntax may be mixed |
+| `/api/html` | | HTML | **strict**: a page an HTML validator accepts; `output` is the compiled page |
+| `/api/css` | | CSS | **strict**: a stylesheet a CSS validator accepts; `output` is the compiled stylesheet |
+| `/api/sa` | `/api/quantum` | Quantum | **flexible**: Python, JavaScript, C/C++, Java and Ruby syntax may be mixed; or an HTML page or stylesheet |
 
 Request body:
 
@@ -111,7 +119,8 @@ Request body:
 | --- | --- | --- |
 | `code` | yes | The program (at most `MAX_CODE_LENGTH` characters) |
 | `stdin` | no | Text fed to the program's standard input (alias: `input`); after it the program reads end-of-file |
-| `args` | no | Command-line arguments: up to 32 strings (`sys.argv[1:]`, `process.argv.slice(2)`, `ARGV`, `argv`) |
+| `args` | no | Command-line arguments: up to 32 strings (`sys.argv[1:]`, `process.argv.slice(2)`, `ARGV`, `argv`); not used by HTML and CSS |
+| `css` | no | HTML only: a stylesheet saved as `style.css` next to the page, checked, and inlined into it (the page may also link it with `<link rel="stylesheet" href="style.css">`) |
 
 Response:
 
@@ -142,7 +151,14 @@ Response:
   carries the program's stderr, such as Python's traceback or node's stack
   trace.
 - Messages name the file `main.c`, `main.cpp`, `<PublicClass>.java`,
-  `main.js`, `main.py`, `main.rb` or `main.sa`, never a server path.
+  `main.js`, `main.py`, `main.rb`, `index.html`, `style.css` or `main.sa`,
+  never a server path.
+- For HTML, `output` is the document as a browser builds it: implied tags
+  added (`<tbody>`, closing `</p>` and `</li>`), character references decoded,
+  and the stylesheets the page links from local files inlined as `<style>`.
+  Show it in an `<iframe srcdoc>` to preview the page. For CSS, `output` is
+  the stylesheet a browser keeps: one declaration per line, comments removed,
+  and anything a browser would drop left out.
 - Invalid requests get `400` (missing/empty `code`, non-string `stdin`, bad
   `args`) or `413` (too long); other HTTP methods get `405`.
 
@@ -160,6 +176,24 @@ curl -X POST http://localhost:5000/api/python \
   "language": "py",
   "stage": "compile",
   "compileError": "  File \"main.py\", line 1\n    if x\n        ^\nSyntaxError: expected ':'",
+  "...": "..."
+}
+```
+
+Example: a page and its stylesheet.
+
+```bash
+curl -X POST http://localhost:5000/api/html \
+  -H 'Content-Type: application/json' \
+  -d '{"code":"<h1 class=\"t\">Hi</h1>","css":".t { colr: red; }"}'
+```
+
+```json
+{
+  "success": false,
+  "language": "html",
+  "stage": "compile",
+  "compileError": "index.html:1:1: warning: Start tag seen without seeing a doctype first. Expected \"<!DOCTYPE html>\".\n    1 | <h1 class=\"t\">Hi</h1>\n      | ^~~\nstyle.css:1:6: error: Unknown property \"colr\". Did you mean \"color\"?\n    1 | .t { colr: red; }\n      |      ^~~~",
   "...": "..."
 }
 ```
@@ -272,78 +306,6 @@ docker run -p 5000:5000 -e ALLOWED_ORIGINS=https://your-frontend.example quantum
 For a platform that builds from the git repo, `bin/qrun.exe` must be
 committed. On a Windows host, skip Docker: `npm ci --omit=dev && npm start`
 with `QRUN_PATH` pointing at `qrun.exe` and `QRUN_LAUNCHER` empty.
-
-### Language endpoints: `POST /api/c`, `/api/cpp`, `/api/java`, `/api/sa`
-
-Each endpoint compiles and runs one program on the Quantum VM and returns its
-output. They are also served without the `/api` prefix (`POST /cpp` is the same
-endpoint as `POST /api/cpp`, sharing one rate-limit budget).
-
-| Endpoint | Language | Mode |
-| --- | --- | --- |
-| `/api/c` | C | **strict**: the code must be valid C (as gcc accepts it) |
-| `/api/cpp` | C++ | **strict**: the code must be valid C++ (as g++ accepts it) |
-| `/api/java` | Java | **strict**: one compilation unit, as `javac` accepts it |
-| `/api/sa` | Quantum | **flexible**: Python, JavaScript, C/C++ and Ruby syntax may be mixed |
-
-In strict mode, programs the real compiler rejects — for example another
-language's syntax, an undeclared name, a C library call without its header,
-`std::cout` without `<iostream>` or `using namespace std`, assigning a `const`,
-using a private member, or `return 5;` in a `void` function — are reported as
-compile errors in the real compiler's format (`main.cpp:3:5: error: ...`,
-javac's `Main.java:3: error: ...`).
-
-Request body:
-
-```json
-{ "code": "#include <iostream>\nint main(){ int x; std::cin >> x; std::cout << x * 2; }", "stdin": "21" }
-```
-
-| Field | Required | Description |
-| --- | --- | --- |
-| `code` | yes | The program (at most `MAX_CODE_LENGTH` characters) |
-| `stdin` | no | Text fed to the program's standard input (alias: `input`) |
-| `args` | no | Command-line arguments: up to 32 strings |
-
-Response:
-
-```json
-{
-  "success": true,
-  "language": "cpp",
-  "mode": "strict",
-  "stage": "run",
-  "output": "42",
-  "error": null,
-  "compileError": null,
-  "warnings": null,
-  "exitCode": 0,
-  "timedOut": false,
-  "truncated": false,
-  "executionTimeMs": 41
-}
-```
-
-- `stage` is `"compile"` when the program was rejected (then `compileError`
-  holds the diagnostics and nothing ran) and `"run"` otherwise.
-- `success` is `true` only when the program compiled, ran to completion within
-  `EXEC_TIMEOUT_MS`, and exited with status 0. A non-zero `exitCode` (from
-  `return 3;` in `main`, `exit(1)`, `System.exit(2)`, an uncaught exception)
-  makes it `false`; `error` then carries the program's stderr (for Java, the
-  JVM-style stack trace).
-- Invalid requests get `400` (missing/empty `code`, non-string `stdin`, bad
-  `args`) or `413` (too long); other HTTP methods get `405`.
-
-`GET /api/languages` lists the endpoints:
-
-```json
-{
-  "success": true,
-  "languages": [
-    { "id": "cpp", "name": "C++", "endpoint": "/api/cpp", "extension": ".cpp", "mode": "strict", "description": "..." }
-  ]
-}
-```
 
 ## Demo mode
 

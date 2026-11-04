@@ -14,8 +14,8 @@ describe("GET /api/languages", () => {
     const res = await request(app).get("/api/languages");
     expect(res.status).toBe(200);
     const byId = Object.fromEntries(res.body.languages.map((l) => [l.id, l]));
-    expect(Object.keys(byId).sort()).toEqual(["c", "cpp", "java", "js", "py", "rb", "sa"]);
-    for (const id of ["c", "cpp", "java", "js", "py", "rb"]) expect(byId[id].mode).toBe("strict");
+    expect(Object.keys(byId).sort()).toEqual(["c", "cpp", "css", "html", "java", "js", "py", "rb", "sa"]);
+    for (const id of ["c", "cpp", "css", "html", "java", "js", "py", "rb"]) expect(byId[id].mode).toBe("strict");
     expect(byId.sa.mode).toBe("flexible");
     expect(byId.cpp.endpoint).toBe("/api/cpp");
     expect(byId.py.aliases).toEqual(["/api/python"]);
@@ -47,6 +47,12 @@ describe("POST /api/<language> — validation", () => {
     const res = await request(app).get("/api/java");
     expect(res.status).toBe(405);
     expect(res.headers.allow).toBe("POST");
+  });
+
+  it("rejects a non-string css field", async () => {
+    const res = await request(app).post("/api/html").send({ code: "<p>x</p>", css: 5 });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/css/);
   });
 
   it("validates on alias endpoints too", async () => {
@@ -330,7 +336,108 @@ engine("POST /api/rb", () => {
   });
 });
 
+const page = (body) =>
+  `<!DOCTYPE html>\n<html lang="en">\n<head><title>T</title></head>\n<body>${body}</body>\n</html>\n`;
+
+engine("POST /api/html", () => {
+  it("compiles a page to the document a browser builds", async () => {
+    const res = await request(app)
+      .post("/api/html")
+      .send({ code: page("<p>One<p>Two &amp; &copy;<ul><li>a<li>b</ul>") });
+    expect(res.body).toMatchObject({ success: true, language: "html", mode: "strict", stage: "run" });
+    expect(res.body.output).toBe(
+      // whitespace after </body> and </html> belongs to the body, as in a browser
+      '<!DOCTYPE html>\n<html lang="en"><head><title>T</title></head>\n<body><p>One</p><p>Two &amp; ©</p><ul><li>a</li><li>b</li></ul>\n\n</body></html>\n'
+    );
+  });
+
+  it("applies the css field as style.css, and reports its problems under that name", async () => {
+    const ok = await request(app).post("/api/html").send({ code: page('<p class="x">Hi</p>'), css: ".x { color: tomato; }" });
+    expect(ok.body.success).toBe(true);
+    expect(ok.body.output).toContain("<style>.x { color: tomato; }</style></head>");
+
+    const bad = await request(app).post("/api/html").send({ code: page("<p>Hi</p>"), css: ".x { colr: tomato; }" });
+    expect(bad.body).toMatchObject({ success: false, stage: "compile" });
+    expect(bad.body.compileError).toMatch(/^style\.css:1:6: error: Unknown property "colr"\. Did you mean "color"\?/);
+  });
+
+  it("inlines a linked stylesheet", async () => {
+    const code = page("<h1>Hi</h1>").replace("</head>", '<link rel="stylesheet" href="style.css"></head>');
+    const res = await request(app).post("/api/html").send({ code, css: "h1 { margin: 0; }" });
+    expect(res.body.success).toBe(true);
+    expect(res.body.output).toContain("<style>h1 { margin: 0; }</style>");
+    expect(res.body.output).not.toContain("<link");
+  });
+
+  it("reports what a validator reports", async () => {
+    const res = await request(app).post("/api/html").send({ code: page("<div><span>text</div>\n<foo>x</foo>") });
+    expect(res.body).toMatchObject({ success: false, stage: "compile" });
+    expect(res.body.compileError).toMatch(/index\.html:4:12: error: Unclosed element "span"\./);
+    expect(res.body.compileError).toMatch(/error: End tag "div" seen, but there were open elements\./);
+    expect(res.body.compileError).toMatch(/error: Unknown element "foo"\./);
+  });
+
+  it("checks CSS inside the page", async () => {
+    const code = page('<p style="width: 10">x</p>').replace("</head>", "<style>h1 { display: flexx; }</style></head>");
+    const res = await request(app).post("/api/html").send({ code });
+    expect(res.body.compileError).toMatch(/index\.html:3:44: error: "flexx" is not a valid value for "display"\. Did you mean "flex"\?/);
+    expect(res.body.compileError).toMatch(/error: "10" needs a unit, like "10px"\./);
+  });
+
+  it("compiles a fragment, with only a warning about the doctype", async () => {
+    const res = await request(app).post("/api/html").send({ code: "<h1>Hi</h1>" });
+    expect(res.body).toMatchObject({ success: true, output: "<html><head></head><body><h1>Hi</h1></body></html>\n" });
+    expect(res.body.warnings).toMatch(/warning: Start tag seen without seeing a doctype first/);
+  });
+});
+
+engine("POST /api/css", () => {
+  it("compiles a stylesheet to the rules a browser keeps", async () => {
+    const res = await request(app)
+      .post("/api/css")
+      .send({ code: "/* site */\nbody{margin:0;color:#333}\n@media (max-width: 600px){ .card{padding:8px 16px} }" });
+    expect(res.body).toMatchObject({ success: true, language: "css", mode: "strict" });
+    expect(res.body.output).toBe(
+      "body {\n  margin: 0;\n  color: #333;\n}\n\n@media (max-width: 600px) {\n  .card {\n    padding: 8px 16px;\n  }\n}\n"
+    );
+  });
+
+  it("reports what a validator reports", async () => {
+    const res = await request(app).post("/api/css").send({ code: "h1 { colr: red; font-size: 20 }\n.x { color: bleu }" });
+    expect(res.body).toMatchObject({ success: false, stage: "compile" });
+    expect(res.body.compileError).toMatch(/style\.css:1:6: error: Unknown property "colr"\. Did you mean "color"\?/);
+    expect(res.body.compileError).toMatch(/style\.css:1:28: error: "20" needs a unit, like "20px"\./);
+    expect(res.body.compileError).toMatch(/style\.css:2:13: error: "bleu" is not a valid color\. Did you mean "blue"\?/);
+  });
+
+  it("rejects other languages' syntax", async () => {
+    const res = await request(app).post("/api/css").send({ code: 'print("hello")\n' });
+    expect(res.body.stage).toBe("compile");
+    expect(res.body.compileError).toMatch(/error: Expected "\{" after the selector\./);
+  });
+});
+
 engine("POST /api/sa", () => {
+  it("compiles a page written in a .sa file", async () => {
+    const res = await request(app).post("/api/sa").send({ code: page("<h1>Hi</h1>") });
+    expect(res.body).toMatchObject({ success: true, language: "sa", mode: "flexible" });
+    expect(res.body.output).toContain("<h1>Hi</h1>");
+  });
+
+  it("compiles a stylesheet written in a .sa file", async () => {
+    const res = await request(app).post("/api/quantum").send({ code: ".btn { padding: 8px }" });
+    expect(res.body).toMatchObject({ success: true, output: ".btn {\n  padding: 8px;\n}\n" });
+  });
+
+  it("writes a .sa page with mistakes, warning about them", async () => {
+    const res = await request(app).post("/api/sa").send({ code: page("<div>open") });
+    expect(res.body).toMatchObject({ success: true, stage: "run" });
+    expect(res.body.warnings).toMatch(/error: Unclosed element "div"\./);
+    expect(res.body.output).toContain("<div>open</div>");
+  });
+});
+
+engine("POST /api/sa — programs", () => {
   it("accepts mixed syntax", async () => {
     const code = 'print("python style")\nconsole.log("js style")\nlet x = 2\nif x > 1:\n    print("indent block")';
     const res = await request(app).post("/api/sa").send({ code });
