@@ -4,7 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 const config = require("../config");
-const { resolveQrunPath, buildCommand, STAGE_MARKER } = require("../services/qrun.service");
+const { resolveQrunPath, buildCommand, hideDir, STAGE_MARKER } = require("../services/qrun.service");
 
 // The stage marker is for the API; the terminal never shows it.
 const MARKER_LINE = new RegExp(`${STAGE_MARKER.replace(/[[\]]/g, '\\$&')}\\r?\\n?`);
@@ -37,10 +37,10 @@ function setupWebSocket(server) {
             const fileName = `sandbox_${crypto.randomBytes(8).toString('hex')}${ext}`;
             const tempFilePath = path.join(config.SANDBOX_DIR, fileName);
             // Diagnostics name the file as the user knows it (main.cpp:3:2),
-            // never the sandbox copy.
+            // never the sandbox copy or the folder it sits in.
             const baseName = typeof requestedName === 'string' ? path.basename(requestedName) : '';
             const shownName = /^[\w.\- ]{1,100}$/.test(baseName) ? baseName : `script${ext}`;
-            const rename = (text) => text.split(fileName).join(shownName);
+            const rename = (text) => hideDir(text, config.SANDBOX_DIR).split(fileName).join(shownName);
 
             fs.writeFile(tempFilePath, typeof code === 'string' ? code : '', (err) => {
                 if (err) {

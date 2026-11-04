@@ -86,11 +86,12 @@ function listLanguages(req, res) {
       id,
       name: lang.name,
       endpoint: `/api/${id}`,
+      aliases: lang.aliases.map((alias) => `/api/${alias}`),
       extension: lang.extension,
       mode: lang.strict ? "strict" : "flexible",
       description: lang.strict
         ? `Standard ${lang.name}: the code must be valid ${lang.name}; anything else is a compile error.`
-        : "Quantum multi-syntax: Python, JavaScript, C/C++ and Ruby styles may be mixed freely.",
+        : "Quantum multi-syntax: Python, JavaScript, C/C++, Java and Ruby styles may be mixed freely.",
     })),
   });
 }

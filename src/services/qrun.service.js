@@ -41,20 +41,34 @@ function stripAnsi(text) {
   return text ? text.replace(/\u001b\[[0-9;]*m/g, "").trim() : null;
 }
 
+// Removes the server folder `dir` from text a program produced. node (and so
+// qrun's JavaScript) names the script by its absolute path, and a program can
+// print its own folder: "C:\srv\tmp\run_1\main.js:1" becomes "main.js:1", and
+// the bare folder becomes ".".
+function hideDir(text, dir) {
+  if (!text) return text;
+  let out = text;
+  for (const form of new Set([dir, dir.replace(/\\/g, "/")])) {
+    out = out.split(`${form}\\`).join("").split(`${form}/`).join("").split(form).join(".");
+  }
+  return out;
+}
+
 // Remove the internal sandbox temp path from messages so users never see
 // server-side file paths. Replaces any sandbox_<hash><ext> filename with a
 // neutral "script<ext>".
 function cleanSandboxPath(text) {
   if (!text) return text;
-  return text.replace(/sandbox_[a-f0-9]+(\.\w+)/gi, "script$1");
+  return hideDir(text, config.SANDBOX_DIR).replace(/sandbox_[a-f0-9]+(\.\w+)/gi, "script$1");
 }
 
 function isStrict(extension) {
   return config.STRICT_EXTENSIONS.includes(extension);
 }
 
-// The command line for running `file`: C/C++ get --strict so the compiler
-// rejects whatever g++/gcc would, instead of accepting Quantum's mixed syntax.
+// The command line for running `file`: every language but .sa gets --strict
+// so the compiler rejects whatever gcc/javac/python/node/ruby would, instead
+// of accepting Quantum's mixed syntax.
 function buildCommand(qrunPath, extension, file) {
   const args = ["--stage-marker", ...(isStrict(extension) ? ["--strict"] : []), file];
   return config.QRUN_LAUNCHER
@@ -125,6 +139,7 @@ module.exports = {
   resolveQrunPath,
   runCode,
   stripAnsi,
+  hideDir,
   cleanSandboxPath,
   splitStages,
   buildCommand,

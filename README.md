@@ -49,17 +49,32 @@ All configuration is via environment variables (see `.env.example`):
 | `WS_EXEC_TIMEOUT_MS` | `300000` | Same, for interactive IDE runs over the WebSocket |
 | `MAX_CODE_LENGTH` | `20000` | Reject submissions with more characters than this |
 | `MAX_STDIN_LENGTH` | `65536` | Reject `stdin` longer than this |
-| `RATE_LIMIT_WINDOW_MS` | `60000` | Rate-limit window for `/api/execute` |
+| `RATE_LIMIT_WINDOW_MS` | `60000` | Rate-limit window for `/api/execute` and the language endpoints |
 | `RATE_LIMIT_MAX` | `20` | Max requests per window per IP |
-| `MAX_STDIN_LENGTH` | `100000` | Reject `stdin` longer than this (language endpoints) |
 
-## Strict C/C++ vs. reflexive `.sa`
+## Strict languages vs. reflexive `.sa`
 
-`.cpp` and `.c` submissions run under `qrun --strict`: anything g++/gcc would
-reject — a missing `;`, `cout` without `std::`, an undeclared name, Python or
-JavaScript syntax — is a compile error with a gcc-style message, and the
-program never runs. Only `.sa` files get Quantum's reflexive mixed-syntax
-mode, where Python, JavaScript, Ruby and C++ can share one file.
+Every language except Quantum runs under `qrun --strict`. The program must be
+valid in its own language: anything the real tool would reject (gcc, g++,
+javac, python, node or ruby) is a compile error, and the program never runs.
+That includes another language's syntax, a missing `;`, `cout` without
+`std::`, or an undeclared name in C/C++. The error is printed the way that
+tool prints it:
+
+| Language | Compile error | Uncaught error at run time |
+| --- | --- | --- |
+| C / C++ | `main.cpp:5:5: error: expected ';' before 'cout'` + source line and caret | `terminate called after throwing ...` |
+| Java | `Main.java:3: error: ';' expected` + source line and caret | `Exception in thread "main" java.lang....` + stack trace |
+| Python | `File "main.py", line 1` / source line / caret / `SyntaxError: ...` (or `IndentationError`) | `Traceback (most recent call last): ...` |
+| JavaScript | `main.js:1` / source line / caret / `SyntaxError: ...` | node's `TypeError: ...` + stack trace |
+| Ruby | `main.rb:1: syntax error, unexpected ')' (SyntaxError)` + source line | `main.rb:2:in '<main>': boom (ArgumentError)` |
+
+Only `.sa` files get Quantum's reflexive mixed-syntax mode, where Python,
+JavaScript, Ruby, Java and C++ can share one file.
+
+Every program runs on the Quantum VM: qrun has its own C, C++, Java, Python,
+JavaScript and Ruby front-ends. Python, Node.js, Ruby, gcc and the JDK are
+never installed or called.
 
 ## API
 
@@ -67,6 +82,105 @@ mode, where Python, JavaScript, Ruby and C++ can share one file.
 
 ```json
 { "status": "ok", "qrunAvailable": true, "environment": "development" }
+```
+
+### Language endpoints: `POST /api/<language>`
+
+Each endpoint compiles and runs one program on the Quantum VM and returns its
+output. They are also served without the `/api` prefix (`POST /cpp` is the same
+endpoint as `POST /api/cpp`). An alias is the same endpoint under another name:
+`POST /api/python` is `POST /api/py`. All of them share one rate-limit budget.
+
+| Endpoint | Aliases | Language | Mode |
+| --- | --- | --- | --- |
+| `/api/c` | | C | **strict**: the code must be valid C (as gcc accepts it) |
+| `/api/cpp` | | C++ | **strict**: the code must be valid C++ (as g++ accepts it) |
+| `/api/java` | | Java | **strict**: one compilation unit, as `javac` accepts it |
+| `/api/js` | `/api/javascript` | JavaScript | **strict**: a Node.js script (CommonJS: `require`, `process`, `fs`) |
+| `/api/py` | `/api/python` | Python | **strict**: a Python 3 program |
+| `/api/rb` | `/api/ruby` | Ruby | **strict**: a Ruby program |
+| `/api/sa` | `/api/quantum` | Quantum | **flexible**: Python, JavaScript, C/C++, Java and Ruby syntax may be mixed |
+
+Request body:
+
+```json
+{ "code": "name = input()\nprint(f\"hi {name}\")", "stdin": "Ada\n" }
+```
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `code` | yes | The program (at most `MAX_CODE_LENGTH` characters) |
+| `stdin` | no | Text fed to the program's standard input (alias: `input`); after it the program reads end-of-file |
+| `args` | no | Command-line arguments: up to 32 strings (`sys.argv[1:]`, `process.argv.slice(2)`, `ARGV`, `argv`) |
+
+Response:
+
+```json
+{
+  "success": true,
+  "language": "py",
+  "mode": "strict",
+  "stage": "run",
+  "output": "hi Ada\n",
+  "error": null,
+  "compileError": null,
+  "warnings": null,
+  "exitCode": 0,
+  "timedOut": false,
+  "truncated": false,
+  "executionTimeMs": 41
+}
+```
+
+- `language` is the endpoint's id (`py` for both `/api/py` and `/api/python`).
+- `stage` is `"compile"` when the program was rejected (then `compileError`
+  holds the diagnostics and nothing ran) and `"run"` otherwise.
+- `success` is `true` only when the program compiled, ran to completion within
+  `EXEC_TIMEOUT_MS`, and exited with status 0. A non-zero `exitCode` (from
+  `return 3;` in `main`, `exit(1)`, `System.exit(2)`, `sys.exit(4)`,
+  `process.exit(1)`, an uncaught exception) makes it `false`; `error` then
+  carries the program's stderr, such as Python's traceback or node's stack
+  trace.
+- Messages name the file `main.c`, `main.cpp`, `<PublicClass>.java`,
+  `main.js`, `main.py`, `main.rb` or `main.sa`, never a server path.
+- Invalid requests get `400` (missing/empty `code`, non-string `stdin`, bad
+  `args`) or `413` (too long); other HTTP methods get `405`.
+
+Example: a Python syntax error.
+
+```bash
+curl -X POST http://localhost:5000/api/python \
+  -H 'Content-Type: application/json' \
+  -d '{"code":"if x\n    print(1)\n"}'
+```
+
+```json
+{
+  "success": false,
+  "language": "py",
+  "stage": "compile",
+  "compileError": "  File \"main.py\", line 1\n    if x\n        ^\nSyntaxError: expected ':'",
+  "...": "..."
+}
+```
+
+`GET /api/languages` lists the endpoints:
+
+```json
+{
+  "success": true,
+  "languages": [
+    {
+      "id": "py",
+      "name": "Python",
+      "endpoint": "/api/py",
+      "aliases": ["/api/python"],
+      "extension": ".py",
+      "mode": "strict",
+      "description": "Standard Python: the code must be valid Python; anything else is a compile error."
+    }
+  ]
+}
 ```
 
 ### `POST /api/execute`
@@ -81,14 +195,10 @@ Request body:
 }
 ```
 
-<<<<<<< HEAD
-`ext` must be one of `.sa`, `.js`, `.py`, `.rb`, `.cpp`, `.c`, `.java`. `code` is the raw source text
-(capped at `MAX_CODE_LENGTH` characters).
-=======
-`ext` must be one of `.sa`, `.js`, `.py`, `.rb`, `.cpp`, `.c`. `code` is the raw
-source text (capped at `MAX_CODE_LENGTH`). `stdin` is optional; the program
-reads it and then gets end-of-file.
->>>>>>> 79c8d4be59195d76d369bcb80d7068400402f918
+`ext` must be one of `.c`, `.cpp`, `.java`, `.js`, `.py`, `.rb`, `.sa`; all but
+`.sa` are strict (see above). `code` is the raw source text (capped at
+`MAX_CODE_LENGTH`). `stdin` is optional; the program reads it and then gets
+end-of-file.
 
 Success:
 

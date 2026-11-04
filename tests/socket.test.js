@@ -69,6 +69,23 @@ describeWithQrun("WebSocket execution", () => {
     expect(r.stderr).not.toMatch(/sandbox_|quantum:compiled/);
   });
 
+  it("checks Python strictly and feeds it typed input", async () => {
+    const bad = await runOver(".py", "if x\n    print(1)\n", { name: "app.py" });
+    expect(bad.exit).toMatchObject({ exitCode: 1, stage: "compile" });
+    expect(bad.stderr).toMatch(/File "app\.py", line 1/);
+
+    const r = await runOver(".py", 'name = input("Name? ")\nprint("Hi " + name)\n', { replies: { "Name?": "Ada\n" } });
+    expect(r.stdout).toContain("Hi Ada");
+    expect(r.exit).toMatchObject({ exitCode: 0, stage: null });
+  });
+
+  it("names a JavaScript error's file without the server's folders", async () => {
+    const r = await runOver(".js", "null.foo;\n", { name: "app.js" });
+    expect(r.exit.stage).toBe("runtime");
+    expect(r.stderr).toContain("(app.js:1:6)");
+    expect(r.stderr).not.toMatch(/sandbox_|[\\/]tmp[\\/]/);
+  });
+
   it("reports a runtime failure as stage 'runtime'", async () => {
     const r = await runOver(
       ".cpp",
