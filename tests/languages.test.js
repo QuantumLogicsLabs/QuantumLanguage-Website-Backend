@@ -14,12 +14,14 @@ describe("GET /api/languages", () => {
     const res = await request(app).get("/api/languages");
     expect(res.status).toBe(200);
     const byId = Object.fromEntries(res.body.languages.map((l) => [l.id, l]));
-    expect(Object.keys(byId).sort()).toEqual(["c", "cpp", "java", "sa"]);
-    expect(byId.c.mode).toBe("strict");
-    expect(byId.cpp.mode).toBe("strict");
-    expect(byId.java.mode).toBe("strict");
+    expect(Object.keys(byId).sort()).toEqual(["c", "cpp", "java", "js", "py", "rb", "sa"]);
+    for (const id of ["c", "cpp", "java", "js", "py", "rb"]) expect(byId[id].mode).toBe("strict");
     expect(byId.sa.mode).toBe("flexible");
     expect(byId.cpp.endpoint).toBe("/api/cpp");
+    expect(byId.py.aliases).toEqual(["/api/python"]);
+    expect(byId.js.aliases).toEqual(["/api/javascript"]);
+    expect(byId.rb.aliases).toEqual(["/api/ruby"]);
+    expect(byId.sa.aliases).toEqual(["/api/quantum"]);
   });
 });
 
@@ -45,6 +47,13 @@ describe("POST /api/<language> — validation", () => {
     const res = await request(app).get("/api/java");
     expect(res.status).toBe(405);
     expect(res.headers.allow).toBe("POST");
+  });
+
+  it("validates on alias endpoints too", async () => {
+    const res = await request(app).post("/api/python").send({ code: "   " });
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({ success: false, language: "py" });
+    expect((await request(app).get("/api/ruby")).status).toBe(405);
   });
 });
 
@@ -156,6 +165,171 @@ engine("POST /api/java", () => {
   });
 });
 
+engine("POST /api/js", () => {
+  it("runs JavaScript the way node prints it", async () => {
+    const code = "const a = [1, 2, 3];\nconsole.log(a.map((x) => x * 2), { a: 1 });\nconsole.log(`t=${typeof null}`);";
+    const res = await request(app).post("/api/js").send({ code });
+    expect(res.body).toMatchObject({
+      success: true,
+      language: "js",
+      mode: "strict",
+      stage: "run",
+      output: "[ 2, 4, 6 ] { a: 1 }\nt=object\n",
+    });
+  });
+
+  it("is also served as /api/javascript and /javascript", async () => {
+    for (const url of ["/api/javascript", "/javascript"]) {
+      const res = await request(app).post(url).send({ code: "console.log(6 * 7)" });
+      expect(res.body).toMatchObject({ success: true, language: "js", output: "42\n" });
+    }
+  });
+
+  it("reads stdin", async () => {
+    const code = 'const lines = require("fs").readFileSync(0, "utf8").trim().split("\\n");\nconsole.log(lines.map(Number).reduce((a, b) => a + b));';
+    const res = await request(app).post("/api/js").send({ code, stdin: "19\n23\n" });
+    expect(res.body.output).toBe("42\n");
+  });
+
+  it("passes args as process.argv", async () => {
+    const res = await request(app).post("/api/js").send({ code: "console.log(process.argv.slice(2));", args: ["x", "y z"] });
+    expect(res.body.output).toBe("[ 'x', 'y z' ]\n");
+  });
+
+  it("reports syntax errors at compile time, like node, without server paths", async () => {
+    const res = await request(app).post("/api/js").send({ code: "let x = ;\n" });
+    expect(res.body).toMatchObject({ success: false, stage: "compile", output: "" });
+    expect(res.body.compileError).toBe("main.js:1\nlet x = ;\n        ^\n\nSyntaxError: Unexpected token ';'\n\nNode.js v20.20.2");
+  });
+
+  it("rejects other languages' syntax", async () => {
+    const res = await request(app).post("/api/js").send({ code: 'print("hello")\nif x > 1:\n    print(2)\n' });
+    expect(res.body.stage).toBe("compile");
+    expect(res.body.compileError).toMatch(/SyntaxError: Unexpected identifier 'x'/);
+  });
+
+  it("reports an uncaught exception the way node does", async () => {
+    const res = await request(app).post("/api/js").send({ code: "console.log('before');\nnull.foo;\n" });
+    expect(res.body).toMatchObject({ success: false, stage: "run", output: "before\n", exitCode: 1 });
+    expect(res.body.error).toMatch(/^TypeError: Cannot read properties of null \(reading 'foo'\)/);
+    expect(res.body.error).toMatch(/\(main\.js:2:6\)/);
+    expect(res.body.error).not.toMatch(/run_[0-9a-f]+/);
+  });
+});
+
+engine("POST /api/py", () => {
+  it("runs Python with stdin", async () => {
+    const code = 'x = [1, 2, 3]\nprint(x, None, True)\nprint(sum(i * i for i in x))\nname = input()\nprint(f"hi {name}")\n';
+    const res = await request(app).post("/api/py").send({ code, stdin: "Ada\n" });
+    expect(res.body).toMatchObject({
+      success: true,
+      language: "py",
+      mode: "strict",
+      output: "[1, 2, 3] None True\n14\nhi Ada\n",
+    });
+  });
+
+  it("is also served as /api/python", async () => {
+    const res = await request(app).post("/api/python").send({ code: "print(6 * 7)" });
+    expect(res.body).toMatchObject({ success: true, language: "py", output: "42\n" });
+  });
+
+  it("reads stdin through sys.stdin", async () => {
+    const code = [
+      "import sys",
+      "n = int(sys.stdin.readline())",
+      "rest = [int(line) for line in sys.stdin]",
+      "print(n, sum(rest))",
+    ].join("\n");
+    const res = await request(app).post("/api/python").send({ code, stdin: "3\n10\n20\n12" });
+    expect(res.body).toMatchObject({ success: true, output: "3 42\n" });
+  });
+
+  it("passes args as sys.argv", async () => {
+    const res = await request(app).post("/api/python").send({ code: "import sys\nprint(sys.argv)", args: ["x", "y z"] });
+    expect(res.body.output).toBe("['main.py', 'x', 'y z']\n");
+  });
+
+  it("raises EOFError when input() runs out, like python", async () => {
+    const res = await request(app).post("/api/python").send({ code: "print(input())\nprint(input())\n", stdin: "only\n" });
+    expect(res.body).toMatchObject({ success: false, stage: "run", output: "only\n" });
+    expect(res.body.error).toMatch(/EOFError: EOF when reading a line\n$/);
+  });
+
+  it("reports syntax errors at compile time, like python", async () => {
+    const res = await request(app).post("/api/python").send({ code: "if x\n    print(1)\n" });
+    expect(res.body).toMatchObject({ success: false, stage: "compile" });
+    expect(res.body.compileError).toMatch(/^ {2}File "main\.py", line 1\n {4}if x\n/);
+    expect(res.body.compileError).toMatch(/SyntaxError: /);
+  });
+
+  it("reports indentation errors as IndentationError", async () => {
+    const res = await request(app).post("/api/python").send({ code: "def f():\nreturn 1\n" });
+    expect(res.body.stage).toBe("compile");
+    expect(res.body.compileError).toMatch(/IndentationError: expected an indented block/);
+  });
+
+  it("rejects other languages' syntax", async () => {
+    const res = await request(app).post("/api/python").send({ code: "let x = 5;\nconsole.log(x);\n" });
+    expect(res.body.stage).toBe("compile");
+    expect(res.body.compileError).toMatch(/SyntaxError/);
+  });
+
+  it("reports an uncaught exception with only python's traceback", async () => {
+    const res = await request(app).post("/api/python").send({ code: 'print("before")\nprint(1 / 0)\n' });
+    expect(res.body).toMatchObject({ success: false, stage: "run", output: "before\n", exitCode: 1 });
+    expect(res.body.error).toBe('Traceback (most recent call last):\n  File "main.py", line 2\nZeroDivisionError: division by zero\n');
+  });
+
+  it("passes sys.exit's status through", async () => {
+    const res = await request(app).post("/api/python").send({ code: "import sys\nprint('bye')\nsys.exit(4)\n" });
+    expect(res.body).toMatchObject({ success: false, stage: "run", output: "bye\n", exitCode: 4, error: null });
+  });
+});
+
+engine("POST /api/rb", () => {
+  it("runs Ruby", async () => {
+    const code = 'a = [1, 2, 3]\nputs a.map { |x| x * 2 }.inspect\np({a: 1})\nputs "x=#{a.sum}"\n';
+    const res = await request(app).post("/api/rb").send({ code });
+    expect(res.body).toMatchObject({
+      success: true,
+      language: "rb",
+      mode: "strict",
+      output: "[2, 4, 6]\n{a: 1}\nx=6\n",
+    });
+  });
+
+  it("is also served as /api/ruby, and reads stdin", async () => {
+    const res = await request(app).post("/api/ruby").send({ code: "n = gets.to_i\nputs n * 2\n", stdin: "21\n" });
+    expect(res.body).toMatchObject({ success: true, language: "rb", output: "42\n" });
+  });
+
+  it("passes args as ARGV", async () => {
+    const res = await request(app).post("/api/ruby").send({ code: "p ARGV\nputs $0", args: ["x", "y z"] });
+    expect(res.body.output).toBe('["x", "y z"]\nmain.rb\n');
+  });
+
+  it("reports syntax errors at compile time, like ruby", async () => {
+    const res = await request(app).post("/api/ruby").send({ code: "puts(1 +)\n" });
+    expect(res.body).toMatchObject({ success: false, stage: "compile" });
+    expect(res.body.compileError).toBe("main.rb:1: syntax error, unexpected ')' (SyntaxError)\nputs(1 +)");
+  });
+
+  it("rejects other languages' syntax", async () => {
+    const res = await request(app)
+      .post("/api/ruby")
+      .send({ code: "for (let i = 0; i < 3; i++) {\n  console.log(i);\n}\n" });
+    expect(res.body.stage).toBe("compile");
+    expect(res.body.compileError).toMatch(/^main\.rb:1: syntax error, .* \(SyntaxError\)/);
+  });
+
+  it("reports an uncaught exception the way ruby does", async () => {
+    const res = await request(app).post("/api/ruby").send({ code: 'puts "before"\nraise ArgumentError, "boom"\n' });
+    expect(res.body).toMatchObject({ success: false, stage: "run", output: "before\n", exitCode: 1 });
+    expect(res.body.error).toBe("main.rb:2:in '<main>': boom (ArgumentError)\n");
+  });
+});
+
 engine("POST /api/sa", () => {
   it("accepts mixed syntax", async () => {
     const code = 'print("python style")\nconsole.log("js style")\nlet x = 2\nif x > 1:\n    print("indent block")';
@@ -165,5 +339,10 @@ engine("POST /api/sa", () => {
       mode: "flexible",
       output: "python style\njs style\nindent block\n",
     });
+  });
+
+  it("is also served as /api/quantum", async () => {
+    const res = await request(app).post("/api/quantum").send({ code: 'puts "ruby style"\nconsole.log(1 + 1)' });
+    expect(res.body).toMatchObject({ success: true, language: "sa", output: "ruby style\n2\n" });
   });
 });

@@ -11,6 +11,12 @@ describe("buildCommand", () => {
     expect(buildCommand("qrun", ".c", "f.c").args).toContain("--strict");
   });
 
+  it("passes --strict for Java, JavaScript, Python and Ruby", () => {
+    for (const ext of [".java", ".js", ".py", ".rb"]) {
+      expect(buildCommand("qrun", ext, `f${ext}`).args).toContain("--strict");
+    }
+  });
+
   it("leaves .sa lenient", () => {
     expect(buildCommand("qrun", ".sa", "f.sa").args).not.toContain("--strict");
   });
@@ -106,6 +112,30 @@ describeWithQrun("POST /api/execute — strict C++", () => {
     const res = await run(".cpp", "SecureServer(8080)\nsocket()\nlisten(8080)");
     expect(res.body.success).toBe(false);
     expect(res.body.output).not.toMatch(/listening/i);
+  });
+});
+
+describeWithQrun("POST /api/execute — strict JavaScript, Python, Ruby and Java", () => {
+  it("rejects another language's syntax in .js, .py and .rb", async () => {
+    for (const [ext, code] of [
+      [".js", 'print("hello")\nif x > 1:\n    print(2)\n'],
+      [".py", "let x = 5;\nconsole.log(x);\n"],
+      [".rb", "for (let i = 0; i < 3; i++) {\n  console.log(i);\n}\n"],
+    ]) {
+      const res = await run(ext, code);
+      expect(res.body).toMatchObject({ success: false, stage: "compile", strict: true });
+    }
+  });
+
+  it("names a JavaScript error's file without the server's folders", async () => {
+    const res = await run(".js", "let x = ;\n");
+    expect(res.body.stage).toBe("compile");
+    expect(res.body.error).toMatch(/^script\.js:1\n/);
+  });
+
+  it("runs Java", async () => {
+    const res = await run(".java", 'public class Main { public static void main(String[] a) { System.out.println("hi"); } }');
+    expect(res.body).toMatchObject({ success: true, strict: true, output: "hi" });
   });
 });
 

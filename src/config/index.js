@@ -2,6 +2,23 @@ require("dotenv").config();
 
 const path = require("path");
 
+// Every language the engine runs. Each gets POST /api/<id> (and POST /<id>),
+// plus the same endpoint under each alias.
+// strict: the program must be valid in that language (qrun --strict) —
+// syntax from another language is a compile error, reported the way gcc,
+// javac, python, node or ruby would report it. `.sa` is Quantum's
+// multi-syntax mode: Python, JavaScript, C/C++, Java and Ruby styles may be
+// mixed in one file.
+const LANGUAGES = {
+  c: { name: "C", extension: ".c", strict: true, defaultFile: "main.c", aliases: [] },
+  cpp: { name: "C++", extension: ".cpp", strict: true, defaultFile: "main.cpp", aliases: [] },
+  java: { name: "Java", extension: ".java", strict: true, defaultFile: "Main.java", aliases: [] },
+  js: { name: "JavaScript", extension: ".js", strict: true, defaultFile: "main.js", aliases: ["javascript"] },
+  py: { name: "Python", extension: ".py", strict: true, defaultFile: "main.py", aliases: ["python"] },
+  rb: { name: "Ruby", extension: ".rb", strict: true, defaultFile: "main.rb", aliases: ["ruby"] },
+  sa: { name: "Quantum", extension: ".sa", strict: false, defaultFile: "main.sa", aliases: ["quantum"] },
+};
+
 const config = {
   PORT: process.env.PORT || 5000,
   NODE_ENV: process.env.NODE_ENV || "development",
@@ -19,22 +36,16 @@ const config = {
   RATE_LIMIT_WINDOW_MS: Number(process.env.RATE_LIMIT_WINDOW_MS) || 60000,
   RATE_LIMIT_MAX: Number(process.env.RATE_LIMIT_MAX) || 20,
   MAX_BUFFER_BYTES: 5 * 1024 * 1024,
-  ALLOWED_EXTENSIONS: [".sa", ".js", ".py", ".rb", ".cpp", ".c"],
-  // Checked as real C/C++ (qrun --strict): anything g++/gcc would reject is a
-  // compile error. Only .sa gets Quantum's mixed-syntax leniency.
-  STRICT_EXTENSIONS: [".cpp", ".c"],
+  // What /api/execute and the IDE WebSocket accept, and which of those run
+  // under qrun --strict: every language but .sa, which alone gets Quantum's
+  // mixed-syntax leniency.
+  ALLOWED_EXTENSIONS: Object.values(LANGUAGES).map((l) => l.extension),
+  STRICT_EXTENSIONS: Object.values(LANGUAGES)
+    .filter((l) => l.strict)
+    .map((l) => l.extension),
   SANDBOX_DIR: path.join(__dirname, "..", "tmp"),
 
-  // Per-language execution endpoints (POST /api/<id> and POST /<id>).
-  // strict: the program must be valid in that language (qrun --strict) —
-  // syntax from another language is a compile error. `.sa` is Quantum's
-  // multi-syntax mode: Python, JavaScript, C/C++ and Ruby styles may be mixed.
-  LANGUAGES: {
-    c: { name: "C", extension: ".c", strict: true, defaultFile: "main.c" },
-    cpp: { name: "C++", extension: ".cpp", strict: true, defaultFile: "main.cpp" },
-    java: { name: "Java", extension: ".java", strict: true, defaultFile: "Main.java" },
-    sa: { name: "Quantum", extension: ".sa", strict: false, defaultFile: "main.sa" },
-  },
+  LANGUAGES,
 };
 
 module.exports = config;

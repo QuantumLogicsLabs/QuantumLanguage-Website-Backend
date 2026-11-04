@@ -4,7 +4,8 @@ const config = require("../config");
 const { runLanguage, listLanguages } = require("../controllers/language.controller");
 
 // Mounted at both /api and / (see app.js): POST /api/cpp and POST /cpp are
-// the same endpoint, and both share one rate-limit budget per client.
+// the same endpoint, and both share one rate-limit budget per client. An
+// alias is the same endpoint again (POST /api/python = POST /api/py).
 const router = express.Router();
 
 const runLimiter = rateLimit({
@@ -17,12 +18,15 @@ const runLimiter = rateLimit({
 
 router.get("/languages", listLanguages);
 
-for (const id of Object.keys(config.LANGUAGES)) {
-  router.post(`/${id}`, runLimiter, runLanguage(id));
-  router.all(`/${id}`, (req, res) => {
-    res.set("Allow", "POST");
-    res.status(405).json({ success: false, error: `Use POST /api/${id} with a JSON body { "code": "..." }.` });
-  });
+for (const [id, lang] of Object.entries(config.LANGUAGES)) {
+  const run = runLanguage(id);
+  for (const name of [id, ...lang.aliases]) {
+    router.post(`/${name}`, runLimiter, run);
+    router.all(`/${name}`, (req, res) => {
+      res.set("Allow", "POST");
+      res.status(405).json({ success: false, error: `Use POST /api/${name} with a JSON body { "code": "..." }.` });
+    });
+  }
 }
 
 module.exports = router;

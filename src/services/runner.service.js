@@ -3,10 +3,10 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const config = require("../config");
-const { resolveQrunPath } = require("./qrun.service");
+const { resolveQrunPath, hideDir } = require("./qrun.service");
 
 // Written to stderr by `qrun --stage-marker` once the program has compiled
-// (see compiler/include/Cli.h): diagnostics before it are compile output,
+// (see compiler/src/include/Cli.h.sa): diagnostics before it are compile output,
 // everything after it was printed by the running program.
 const STAGE_MARKER = "\x1e[quantum:compiled]\x1e";
 
@@ -99,8 +99,10 @@ function runProgram({ language, code, stdin = "", args = [] }) {
       clearTimeout(timer);
       fs.rm(dir, { recursive: true, force: true }, () => {});
 
-      const stdout = normalizeNewlines(Buffer.concat(out).toString("utf8"));
-      const stderrAll = normalizeNewlines(Buffer.concat(err).toString("utf8"));
+      // The sandbox folder never shows, even where node would print the
+      // script's absolute path.
+      const stdout = hideDir(normalizeNewlines(Buffer.concat(out).toString("utf8")), dir);
+      const stderrAll = hideDir(normalizeNewlines(Buffer.concat(err).toString("utf8")), dir);
       const at = stderrAll.indexOf(STAGE_MARKER);
       const compiled = at !== -1;
       const compileOutput = compiled ? stderrAll.slice(0, at) : stderrAll;
