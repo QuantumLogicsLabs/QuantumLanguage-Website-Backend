@@ -24,6 +24,11 @@ function validate(body) {
     if (args.length > MAX_ARGS || args.some((a) => a.length > MAX_ARG_LENGTH))
       return [413, `At most ${MAX_ARGS} arguments of up to ${MAX_ARG_LENGTH} characters each.`];
   }
+  if (body.css !== undefined && body.css !== null) {
+    if (typeof body.css !== "string") return [400, "'css' must be a string."];
+    if (body.css.length > config.MAX_CODE_LENGTH)
+      return [413, `CSS exceeds maximum length of ${config.MAX_CODE_LENGTH} characters.`];
+  }
   return null;
 }
 
@@ -41,6 +46,7 @@ function runLanguage(language) {
       code: body.code,
       stdin: typeof stdin === "string" ? stdin : "",
       args: body.args || [],
+      css: typeof body.css === "string" ? body.css : undefined,
     });
 
     if (result.noBinary) {
@@ -91,7 +97,7 @@ function listLanguages(req, res) {
       mode: lang.strict ? "strict" : "flexible",
       description: lang.strict
         ? `Standard ${lang.name}: the code must be valid ${lang.name}; anything else is a compile error.`
-        : "Quantum multi-syntax: Python, JavaScript, C/C++, Java and Ruby styles may be mixed freely.",
+        : "Quantum multi-syntax: Python, JavaScript, C/C++, Java and Ruby styles may be mixed freely; a .sa file may also be an HTML page or a stylesheet.",
     })),
   });
 }

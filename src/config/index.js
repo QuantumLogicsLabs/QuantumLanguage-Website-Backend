@@ -6,9 +6,10 @@ const path = require("path");
 // plus the same endpoint under each alias.
 // strict: the program must be valid in that language (qrun --strict) —
 // syntax from another language is a compile error, reported the way gcc,
-// javac, python, node or ruby would report it. `.sa` is Quantum's
-// multi-syntax mode: Python, JavaScript, C/C++, Java and Ruby styles may be
-// mixed in one file.
+// javac, python, node or ruby would report it (HTML and CSS: the way a
+// validator reports it). `.sa` is Quantum's multi-syntax mode: Python,
+// JavaScript, C/C++, Java and Ruby styles may be mixed in one file, and a
+// .sa file may also hold an HTML page or a stylesheet.
 const LANGUAGES = {
   c: { name: "C", extension: ".c", strict: true, defaultFile: "main.c", aliases: [] },
   cpp: { name: "C++", extension: ".cpp", strict: true, defaultFile: "main.cpp", aliases: [] },
@@ -16,6 +17,8 @@ const LANGUAGES = {
   js: { name: "JavaScript", extension: ".js", strict: true, defaultFile: "main.js", aliases: ["javascript"] },
   py: { name: "Python", extension: ".py", strict: true, defaultFile: "main.py", aliases: ["python"] },
   rb: { name: "Ruby", extension: ".rb", strict: true, defaultFile: "main.rb", aliases: ["ruby"] },
+  html: { name: "HTML", extension: ".html", strict: true, defaultFile: "index.html", aliases: [] },
+  css: { name: "CSS", extension: ".css", strict: true, defaultFile: "style.css", aliases: [] },
   sa: { name: "Quantum", extension: ".sa", strict: false, defaultFile: "main.sa", aliases: ["quantum"] },
 };
 

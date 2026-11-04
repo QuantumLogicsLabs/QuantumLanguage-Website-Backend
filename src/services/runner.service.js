@@ -34,12 +34,14 @@ function stripAnsi(text) {
   return text.replace(/\u001b\[[0-9;]*m/g, "");
 }
 
-// Compiles and runs `code` with qrun inside a fresh sandbox folder.
+// Compiles and runs `code` with qrun inside a fresh sandbox folder. An HTML
+// page may come with its stylesheet (`css`): saved as style.css next to it
+// and applied (qrun index.html style.css) unless the page links it already.
 // Resolves (never rejects) with:
 //   { noBinary } | { writeError } |
 //   { stage: "compile" | "run", compileOutput, stdout, stderr, exitCode,
 //     timedOut, truncated, durationMs, fileName }
-function runProgram({ language, code, stdin = "", args = [] }) {
+function runProgram({ language, code, stdin = "", args = [], css }) {
   return new Promise((resolve) => {
     const qrunPath = resolveQrunPath();
     if (!qrunPath) return resolve({ noBinary: true });
@@ -47,18 +49,22 @@ function runProgram({ language, code, stdin = "", args = [] }) {
     const lang = config.LANGUAGES[language];
     const dir = path.join(config.SANDBOX_DIR, `run_${crypto.randomBytes(8).toString("hex")}`);
     const fileName = sourceFileName(language, code);
+    const sheets = language === "html" && typeof css === "string" ? ["style.css"] : [];
 
     try {
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(path.join(dir, fileName), code, "utf8");
+      if (sheets.length) fs.writeFileSync(path.join(dir, sheets[0]), css, "utf8");
     } catch (err) {
       fs.rm(dir, { recursive: true, force: true }, () => {});
       return resolve({ writeError: true });
     }
 
+    // A page's arguments are the stylesheets applied to it; a stylesheet has none.
+    const programArgs = language === "html" ? sheets : language === "css" ? [] : args;
     const qrunArgs = ["--stage-marker"];
     if (lang.strict) qrunArgs.push("--strict");
-    qrunArgs.push(fileName, ...args);
+    qrunArgs.push(fileName, ...programArgs);
 
     const started = Date.now();
     const child = spawn(qrunPath, qrunArgs, { cwd: dir, windowsHide: true });
