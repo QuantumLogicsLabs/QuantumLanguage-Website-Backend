@@ -28,7 +28,7 @@ function setupWebSocket(server) {
 
                         // Execute directly - no intermediate status messages
                         const fileHash = crypto.randomBytes(8).toString('hex');
-                        const ALLOWED_EXTS = ['.sa', '.js', '.py', '.rb', '.cpp', '.c'];
+                        const ALLOWED_EXTS = ['.sa', '.js', '.py', '.rb', '.cpp', '.c', '.java'];
                         const ext = ALLOWED_EXTS.includes(data.ext) ? data.ext : '.sa';
 
                         const tempFilePath = path.join(__dirname, '..', 'tmp', `sandbox_${fileHash}${ext}`);
@@ -46,7 +46,10 @@ function setupWebSocket(server) {
                                 return;
                             }
 
-                            activeProcess = spawn(qrunPath, [tempFilePath]);
+                            // { strict: true }: C/C++ must be valid C/C++ (qrun --strict),
+                            // as on the /api/c and /api/cpp endpoints. Java is always strict.
+                            const qrunArgs = data.strict ? ['--strict', tempFilePath] : [tempFilePath];
+                            activeProcess = spawn(qrunPath, qrunArgs);
                             
                 
 

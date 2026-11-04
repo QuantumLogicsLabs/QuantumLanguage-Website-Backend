@@ -47,8 +47,9 @@ All configuration is via environment variables (see `.env.example`):
 | `QRUN_PATH` | *(auto-detected)* | Absolute path to the `qrun` executable |
 | `EXEC_TIMEOUT_MS` | `10000` | Kill a running program after this many ms |
 | `MAX_CODE_LENGTH` | `20000` | Reject submissions with more characters than this |
-| `RATE_LIMIT_WINDOW_MS` | `60000` | Rate-limit window for `/api/execute` |
+| `RATE_LIMIT_WINDOW_MS` | `60000` | Rate-limit window for `/api/execute` and the language endpoints |
 | `RATE_LIMIT_MAX` | `20` | Max requests per window per IP |
+| `MAX_STDIN_LENGTH` | `100000` | Reject `stdin` longer than this (language endpoints) |
 
 If `QRUN_PATH` isn't set, the server looks for `qrun.exe`/`qrun.bat` in, in order:
 the path from `QRUN_PATH`, `../QuantumLanguage/`, `../QuantumLanguage/build/`,
@@ -70,7 +71,7 @@ Request body:
 { "ext": ".sa", "code": "print(\"hello\");" }
 ```
 
-`ext` must be one of `.sa`, `.js`, `.py`, `.cpp`, `.c`. `code` is the raw source text
+`ext` must be one of `.sa`, `.js`, `.py`, `.rb`, `.cpp`, `.c`, `.java`. `code` is the raw source text
 (capped at `MAX_CODE_LENGTH` characters).
 
 Response:
@@ -89,6 +90,78 @@ Response:
 On failure, `success` is `false` and `error`/`compilerError` describe the
 problem (syntax error, execution timeout, missing compiler, etc). This
 endpoint is rate-limited per IP via `RATE_LIMIT_WINDOW_MS`/`RATE_LIMIT_MAX`.
+
+### Language endpoints: `POST /api/c`, `/api/cpp`, `/api/java`, `/api/sa`
+
+Each endpoint compiles and runs one program on the Quantum VM and returns its
+output. They are also served without the `/api` prefix (`POST /cpp` is the same
+endpoint as `POST /api/cpp`, sharing one rate-limit budget).
+
+| Endpoint | Language | Mode |
+| --- | --- | --- |
+| `/api/c` | C | **strict**: the code must be valid C (as gcc accepts it) |
+| `/api/cpp` | C++ | **strict**: the code must be valid C++ (as g++ accepts it) |
+| `/api/java` | Java | **strict**: one compilation unit, as `javac` accepts it |
+| `/api/sa` | Quantum | **flexible**: Python, JavaScript, C/C++ and Ruby syntax may be mixed |
+
+In strict mode, programs the real compiler rejects — for example another
+language's syntax, an undeclared name, a C library call without its header,
+`std::cout` without `<iostream>` or `using namespace std`, assigning a `const`,
+using a private member, or `return 5;` in a `void` function — are reported as
+compile errors in the real compiler's format (`main.cpp:3:5: error: ...`,
+javac's `Main.java:3: error: ...`).
+
+Request body:
+
+```json
+{ "code": "#include <iostream>\nint main(){ int x; std::cin >> x; std::cout << x * 2; }", "stdin": "21" }
+```
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `code` | yes | The program (at most `MAX_CODE_LENGTH` characters) |
+| `stdin` | no | Text fed to the program's standard input (alias: `input`) |
+| `args` | no | Command-line arguments: up to 32 strings |
+
+Response:
+
+```json
+{
+  "success": true,
+  "language": "cpp",
+  "mode": "strict",
+  "stage": "run",
+  "output": "42",
+  "error": null,
+  "compileError": null,
+  "warnings": null,
+  "exitCode": 0,
+  "timedOut": false,
+  "truncated": false,
+  "executionTimeMs": 41
+}
+```
+
+- `stage` is `"compile"` when the program was rejected (then `compileError`
+  holds the diagnostics and nothing ran) and `"run"` otherwise.
+- `success` is `true` only when the program compiled, ran to completion within
+  `EXEC_TIMEOUT_MS`, and exited with status 0. A non-zero `exitCode` (from
+  `return 3;` in `main`, `exit(1)`, `System.exit(2)`, an uncaught exception)
+  makes it `false`; `error` then carries the program's stderr (for Java, the
+  JVM-style stack trace).
+- Invalid requests get `400` (missing/empty `code`, non-string `stdin`, bad
+  `args`) or `413` (too long); other HTTP methods get `405`.
+
+`GET /api/languages` lists the endpoints:
+
+```json
+{
+  "success": true,
+  "languages": [
+    { "id": "cpp", "name": "C++", "endpoint": "/api/cpp", "extension": ".cpp", "mode": "strict", "description": "..." }
+  ]
+}
+```
 
 ## Demo mode
 
